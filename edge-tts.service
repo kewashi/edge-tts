@@ -13,7 +13,7 @@ RestartSec=5
 
 Environment=PORT=5005
 Environment=EDGE_VOICE=en-US-AriaNeural
-Environment=EDGE_TTS_TOKEN=kew-secret-tts-token
+Environment=EDGE_TTS_TOKEN=token-not-set
 
 [Install]
 WantedBy=multi-user.target
