@@ -1,0 +1,6 @@
+tts.mp3
+venv/
+__pycache__/
+*.log
+*.cfg
+cache/
