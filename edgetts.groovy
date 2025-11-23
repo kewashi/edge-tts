@@ -1,13 +1,14 @@
 /*
  * Edge TTS App
  * Uses Edge TTS server to generate speech and plays on Sonos via static MP3 URL
+ * the /stream-tts.mp3 endpoint is range-aware and has the .mp3 extension for Sonos compatibility
  */
 
 definition(
     name: "Edge TTS App",
     namespace: "kenw",
     author: "Ken Washington",
-    description: "Edge TTS integration for Sonos using /generate and static MP3 URL",
+    description: "Edge TTS integration for Sonos using /generate and /stream-tts.mp3",
     category: "Convenience",
     iconUrl: "",
     iconX2Url: "",
@@ -18,18 +19,17 @@ preferences {
     page(name: "mainPage", title: "Edge TTS Settings", install: true, uninstall: true) {
 
         section("TTS Server Settings") {
-            input "generateBaseUrl", "text",
-                title: "Generate endpoint base URL",
+            input "baseUrl", "text",
+                title: "TTS server base URL",
                 required: true,
-                defaultValue: "http://kenw.com:5005/generate",
-                description: "Base URL without ?text=…  (e.g. http://1.2.3.4:5005/generate)"
+                defaultValue: "http://192.168.4.161:5005",
+                description: "Base URL and port for generating mp3 and invoking TTS (e.g. http://192.168.1.50:5005)"
 
-            input "mp3Url", "text",
-                title: "Static MP3 URL served by WordPress",
+            input "sharedSecretToken", "password",
+                title: "Shared secret token for /generate",
                 required: true,
-                defaultValue: "https://kenw.com/wp-content/uploads/tts.mp3",
-                description: "Example: https://kenw.com/wp-content/uploads/tts.mp3"
-
+                description: "Must match EDGE_TTS_TOKEN on the server (or use token-not-set to disable token check)"
+             
             input "ttsDelayMs", "number",
                 title: "Delay after generate before play (ms)",
                 required: true,
@@ -52,7 +52,7 @@ preferences {
                     "en-US-GuyNeural"     : "Guy (M)",
                     "en-US-RogerNeural"   : "Roger (M)",
                     "en-US-SteffanNeural" : "Steffan (M)",
-                    "en-US-JasonNeural"   : "Jason (M)"
+                    "en-US-EricNeural"    : "Eric (M)"
                 ]
         }
 
@@ -147,7 +147,7 @@ private createChildDevicesForSonos() {
 def handleSpeak(childDevice, String text, Number volumeOverride = null, String voiceId = null) {
     logDebug "handleSpeak() from ${childDevice?.displayName} with text: ${text}, voiceId: ${voiceId}, volume: ${volumeOverride}"
 
-    if (!generateBaseUrl || !mp3Url || !sonosSpeakers) {
+    if (!baseUrl || !sonosSpeakers) {
         log.warn "Missing configuration; cannot speak"
         return
     }
@@ -177,20 +177,29 @@ def handleSpeak(childDevice, String text, Number volumeOverride = null, String v
  */
 private speakOnSpeakers(String text, Collection speakers, Integer volumeOverride = null, String voiceId = null) {
     // URL-encode the text
-    String url = "${generateBaseUrl}?text=" + java.net.URLEncoder.encode(text, "UTF-8")
+    String generateUrl = baseUrl + "/generate"
     String voiceToUse = voiceId ?: defaultVoiceId
 
-    if (voiceToUse) {
-        url += "&voiceId=" + java.net.URLEncoder.encode(voiceToUse, "UTF-8")
-    }
-    logDebug "Calling generate URL: ${url}"
+    Map body = [
+        text   : text,
+        voiceId: voiceToUse,
+        token  : sharedSecretToken ?: "token-not-set"
+    ]
 
+    def params = [
+        uri               : generateUrl,
+        contentType       : "application/json",
+        requestContentType: "application/json",
+        body              : body
+    ]
+
+    logDebug "POSTing to generate endpoint: ${generateUrl} with text=${text}, token=${sharedSecretToken}, voice=${voiceToUse}"
     try {
-        httpGet(url) { resp ->
+        httpPost(params) { resp ->
             logDebug "Generate response status: ${resp.status}"
         }
     } catch (e) {
-        log.error "Error calling TTS generate endpoint: ${e}"
+        log.error "Error calling TTS generate endpoint via POST: ${e}"
         return
     }
 
@@ -214,6 +223,8 @@ private speakOnSpeakers(String text, Collection speakers, Integer volumeOverride
     }
 
     // Set override volume (if any) and play
+    // set the play URL to the stream-tts endpoint with text and voiceId
+    String mp3Url = baseUrl + "/stream-tts.mp3"
     speakers.each { spk ->
         try {
             if (volumeOverride != null && volumeOverride > 0 && volumeOverride <= 100) {

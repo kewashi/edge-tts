@@ -4,15 +4,16 @@ import asyncio
 import tempfile
 import subprocess
 
-from flask import Flask, request, send_file, abort, Response
+from flask import Flask, request, abort, Response, abort
+from flask import jsonify
 import edge_tts
 
 app = Flask(__name__)
 
 # Where we store generated MP3s
 BASE_DIR = os.path.dirname(__file__)
-CACHE_DIR = os.path.join(BASE_DIR, "cache")
-os.makedirs(CACHE_DIR, exist_ok=True)
+OUT_PATH = os.path.join(BASE_DIR, "tts.mp3")
+API_TOKEN = os.environ.get("EDGE_TTS_TOKEN", "token-not-set")
 
 # Default voice (can override with EDGE_VOICE env or voiceId query param)
 DEFAULT_VOICE = os.environ.get("EDGE_VOICE", "en-US-AriaNeural")
@@ -67,37 +68,115 @@ async def generate_tts_file(text: str, voice: str, out_path: str):
             os.unlink(tmp_raw_path)
 
 
-@app.route("/tts")
-def tts():
-    """
-    GET /tts?text=Hello+world[&voiceId=en-US-GuyNeural]
+@app.route("/generate", methods=["POST"])
+def generate():
+    """POST /generate with JSON or form data: {"text": "Hello world", "voiceId": "en-US-GuyNeural"}"""
 
-    Returns an MP3 suitable for Sonos playback.
-    """
-    text = request.args.get("text", "").strip()
-    voice = request.args.get("voiceId", DEFAULT_VOICE)
-    filename = os.path.join(BASE_DIR, "tts.mp3")
+    # Try JSON body first, then form data as fallback
+    data = request.get_json(silent=True) or {}
+    if not data and request.form:
+        data = request.form.to_dict()
+
+    text = (data.get("text") or "").strip()
+    voice = data.get("voiceId") or DEFAULT_VOICE
+    token = data.get("token") or request.headers.get("X-EDGE-TTS-TOKEN")
+    filename = OUT_PATH
 
     # If no text provided, serve existing tts.mp3 if it exists
     if not text:
-        if os.path.exists(filename):
-            return send_file(filename, mimetype="audio/mpeg")
-        return abort(400, "Missing 'text' parameter and no existing tts.mp3 available")
-    # Otherwise generate a new tts.mp3 overwriting any previous one
+        return jsonify({"error": "Missing 'text' parameter and no existing tts.mp3 available"}), 400
 
-    # Generate (overwriting any existing tts.mp3)
+    # Simple token check
+    if not token or token != API_TOKEN:
+        print("Unauthorized TTS access attempt to /generate")
+        return jsonify({"error": "Unauthorized"}), 401
+
     try:
         asyncio.run(generate_tts_file(text, voice, filename))
+        return jsonify({"status": "ok"})
     except Exception as e:
-        print("TTS error:", e)
-        if os.path.exists(filename):
-            os.unlink(filename)
-        return Response("Internal TTS error", status=500)
+        print("TTS error in /generate:", e)
+        return jsonify({"error": "TTS error"}), 500
 
-    if os.path.exists(filename):
-        return send_file(filename, mimetype="audio/mpeg")
-    return Response("TTS generation failed", status=500)
 
+def _partial_response(path, start, end, file_size, mime="audio/mpeg"):
+    length = end - start + 1
+    with open(path, "rb") as f:
+        f.seek(start)
+        data = f.read(length)
+
+    headers = {
+        "Content-Type": mime,
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+    }
+    return Response(data, status=206, headers=headers)
+
+
+@app.route("/stream-tts.mp3", methods=["GET", "HEAD"])
+def stream_tts():
+    """
+    Range-aware streaming endpoint for the last-generated TTS file.
+    Sonos-friendly: supports Range requests and 206 responses.
+    """
+    path = OUT_PATH
+    if not os.path.exists(path):
+        abort(404)
+
+    file_size = os.path.getsize(path)
+    range_header = request.headers.get("Range", None)
+    # print (f"file_size: {file_size} range_header: {range_header}")
+
+    # No Range header: return full file
+    if not range_header:
+        headers = {
+            "Content-Type": "audio/mpeg",
+            "Content-Length": str(file_size),
+            "Accept-Ranges": "bytes",
+        }
+
+        if request.method == "HEAD":
+            return Response(status=200, headers=headers)
+
+        with open(path, "rb") as f:
+            data = f.read()
+
+        return Response(data, status=200, headers=headers)
+
+    # Parse "bytes=start-end"
+    try:
+        _, range_value = range_header.split("=", 1)
+        start_str, end_str = range_value.split("-", 1)
+        start = int(start_str) if start_str else 0
+        end = int(end_str) if end_str else file_size - 1
+    except Exception:
+        # Malformed Range header
+        print("Malformed Range header:", range_header)
+        return Response(status=416)
+
+    if start >= file_size or start < 0:
+        # Invalid range
+        return Response(status=416)
+
+    if end is None or end >= file_size:
+        end = file_size - 1
+
+    # print(f"Serving bytes {start}-{end} of {file_size}")
+    # print(f"Request method: {request.method}")
+    # HEAD for range: just headers
+    if request.method == "HEAD":
+        length = end - start + 1
+        headers = {
+            "Content-Type": "audio/mpeg",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+        }
+        return Response(status=206, headers=headers)
+
+    # Normal partial response for GET
+    return _partial_response(path, start, end, file_size)
 
 if __name__ == "__main__":
     # Bind to all interfaces so Sonos can reach it

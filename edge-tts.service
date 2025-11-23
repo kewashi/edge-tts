@@ -1,0 +1,19 @@
+[Unit]
+Description=Edge TTS Server for Sonos/Hubitat
+After=network.target
+
+[Service]
+Type=simple
+User=kenwashington
+Group=kenwashington
+WorkingDirectory=/home/kenwashington/edge-tts-server
+ExecStart=/home/kenwashington/edge-tts-server/venv/bin/python server_dgx.py
+Restart=on-failure
+RestartSec=5
+
+Environment=PORT=5005
+Environment=EDGE_VOICE=en-US-AriaNeural
+Environment=EDGE_TTS_TOKEN=kew-secret-tts-token
+
+[Install]
+WantedBy=multi-user.target
