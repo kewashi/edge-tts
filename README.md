@@ -47,10 +47,6 @@ The `/stream-tts.mp3` endpoint responds like a proper MP3 file service:
 - `Accept-Ranges: bytes`
 - Optional `Range` support / 206 responses
 
-Sonos behaves happily because:
-- The URL ends in `.mp3`
-- The HTTP headers are in a format it understands
-
 ---
 
 ## 📁 Project Files
@@ -64,6 +60,18 @@ Place these in your project/repository:
 | `edgetts.groovy` | Hubitat App: manages Sonos devices and sends TTS requests |
 | `edgespeaker.groovy` | Hubitat Driver: virtual TTS speaker devices for each Sonos |
 | `README.md` | This documentation |
+
+
+## 📁 Quick Start Guide
+
+- Install the server_dgx.py application on a suitable Linux/Unix based platform on your local LAN
+- Run the app in a virtual Python environment or optionally set it up as a service
+- Load the .groovy files onto your Hubitat hub
+- edgetts.groovy goes into the Apps code area
+- edgespeaker.groovy goes into the Drivers code area
+- Add a new User App of type Edge TTS type, fill out the required fields
+- A text to voice Sonos child device will be created for each Sonos you select
+- Use one of those devices instead of Alexa Speaks devices anywhere you need speech
 
 ---
 
