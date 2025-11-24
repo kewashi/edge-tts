@@ -3,7 +3,7 @@
 
 This project provides a **local**, **secure**, **Sonos-compatible** text-to-speech (TTS) system for Hubitat Elevation using Microsoft’s **Edge-TTS neural voices**. It is designed as a modern alternative to Echo Speaks, especially after recent Amazon / Alexa changes that broke cookie-based authentication and device discovery for many users.
 
-If you have Sonos speakers and want fast, high-quality TTS without relying on Alexa logins, cookies, Heroku, or cloud services — this project is for you.
+If you have Sonos speakers and want fast, high-quality TTS without relying on Alexa logins, cookies, Heroku, or cloud services — this project is for you.  You can of course just use any of the built-in voices, but all of them sound very robotic compared to the more refined voices used here. This project uses the natural sounding voices from the Microsoft Edge-TTS project. It utilizes the edge-tts Python Module.
 
 ---
 
