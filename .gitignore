@@ -1,3 +1,7 @@
+.vscode/
+.DS_Store
+._*
+debug*.py
 tts.mp3
 venv/
 __pycache__/

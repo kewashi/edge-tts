@@ -3,6 +3,7 @@ import hashlib
 import asyncio
 import tempfile
 import subprocess
+import traceback
 
 from flask import Flask, request, abort, Response, abort
 from flask import jsonify
@@ -13,7 +14,7 @@ app = Flask(__name__)
 # Where we store generated MP3s
 BASE_DIR = os.path.dirname(__file__)
 OUT_PATH = os.path.join(BASE_DIR, "tts.mp3")
-API_TOKEN = os.environ.get("EDGE_TTS_TOKEN", "token-not-set")
+API_TOKEN = os.environ.get("EDGE_TTS_TOKEN", "secret-tts-token")
 
 # Default voice (can override with EDGE_VOICE env or voiceId query param)
 DEFAULT_VOICE = os.environ.get("EDGE_VOICE", "en-US-AriaNeural")
@@ -21,10 +22,27 @@ DEFAULT_VOICE = os.environ.get("EDGE_VOICE", "en-US-AriaNeural")
 # Default port (can override with PORT env)
 DEFAULT_PORT = int(os.environ.get("PORT", "5005"))
 
+async def validate_voice(voice: str) -> str:
+    """Validate voice and return it if valid, otherwise return default."""
+    voices = await edge_tts.list_voices()
+    names = {v['ShortName'] for v in voices}
+    
+    if voice in names:
+        print(f"Voice '{voice}' is valid")
+        return voice
+    else:
+        print(f"Voice '{voice}' is invalid, falling back to {DEFAULT_VOICE}")
+        return DEFAULT_VOICE
+
+
+async def generate_with_validation(text: str, voice: str, out_path: str):
+    """Validate voice and generate TTS, falling back to default if invalid."""
+    validated_voice = await validate_voice(voice)
+    await generate_tts_file(text, validated_voice, out_path)
 
 @app.route("/")
 def index():
-    return "Edge TTS server is running"
+    return f"Edge TTS server is running on port {DEFAULT_PORT}"
 
 
 async def generate_tts_file(text: str, voice: str, out_path: str):
@@ -35,16 +53,19 @@ async def generate_tts_file(text: str, voice: str, out_path: str):
     # 1) Use edge-tts to create a raw MP3
     communicate = edge_tts.Communicate(text=text, voice=voice)
 
+    # print(f"Step 1: Generating TTS for text (len={len(text)}) with voice '{voice}'")
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
     tmp_raw_path = tmp.name
     tmp.close()
 
     try:
         # Save raw TTS MP3
+        # print(f"Step 2: Saving to temporary file '{tmp_raw_path}'")
         await communicate.save(tmp_raw_path)
 
         # 2) Re-encode using ffmpeg to 44.1kHz stereo, 128kbps CBR
         # This helps ensure Sonos compatibility
+        # print(f"Step 3: Re-encoding TTS for Sonos compatibility into '{out_path}'")
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",                  # overwrite
@@ -55,6 +76,7 @@ async def generate_tts_file(text: str, voice: str, out_path: str):
             out_path
         ]
 
+        # print("Final step, running ffmpeg command:", " ".join(ffmpeg_cmd))
         subprocess.run(
             ffmpeg_cmd,
             stdout=subprocess.DEVNULL,
@@ -66,6 +88,7 @@ async def generate_tts_file(text: str, voice: str, out_path: str):
         # Remove the raw/tmp file
         if os.path.exists(tmp_raw_path):
             os.unlink(tmp_raw_path)
+
 
 
 @app.route("/generate", methods=["POST"])
@@ -82,7 +105,7 @@ def generate():
     token = data.get("token") or request.headers.get("X-EDGE-TTS-TOKEN")
     filename = OUT_PATH
 
-    # If no text provided, serve existing tts.mp3 if it exists
+    # If no text provided, skip tts and return an error
     if not text:
         return jsonify({"error": "Missing 'text' parameter and no existing tts.mp3 available"}), 400
 
@@ -92,10 +115,14 @@ def generate():
         return jsonify({"error": "Unauthorized"}), 401
 
     try:
-        asyncio.run(generate_tts_file(text, voice, filename))
+        # asyncio.run(generate_tts_file(text, voice, filename))
+        asyncio.run(generate_with_validation(text, voice, filename))
         return jsonify({"status": "ok"})
+    
     except Exception as e:
+        print("Received data: text:", text, "voice:", voice, "token:", token)
         print("TTS error in /generate:", e)
+        traceback.print_exc()
         return jsonify({"error": "TTS error"}), 500
 
 
@@ -122,7 +149,8 @@ def stream_tts():
     """
     path = OUT_PATH
     if not os.path.exists(path):
-        abort(404)
+        return Response(status=500)
+        # abort(404)
 
     file_size = os.path.getsize(path)
     range_header = request.headers.get("Range", None)
@@ -179,5 +207,6 @@ def stream_tts():
     return _partial_response(path, start, end, file_size)
 
 if __name__ == "__main__":
+
     # Bind to all interfaces so Sonos can reach it
     app.run(host="0.0.0.0", port=DEFAULT_PORT)

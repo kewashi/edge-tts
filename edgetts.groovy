@@ -22,7 +22,7 @@ preferences {
             input "baseUrl", "text",
                 title: "TTS server base URL",
                 required: true,
-                defaultValue: "http://192.168.4.161:5005",
+                defaultValue: "http://192.168.1.50:5005",
                 description: "Base URL and port for generating mp3 and invoking TTS (e.g. http://192.168.1.50:5005)"
 
             input "sharedSecretToken", "password",
@@ -48,7 +48,7 @@ preferences {
                     "en-US-AriaNeural"    : "Aria (F)",
                     "en-US-JennyNeural"   : "Jenny (F)",
                     "en-US-MichelleNeural": "Michelle (F)",
-                    "en-US-CoraNeural"    : "Cora (F)",
+                    "en-US-EmmaNeural"    : "Emma (F)",
                     "en-US-GuyNeural"     : "Guy (M)",
                     "en-US-RogerNeural"   : "Roger (M)",
                     "en-US-SteffanNeural" : "Steffan (M)",
